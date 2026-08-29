@@ -1,0 +1,29 @@
+{
+  "name": "pkuseg-js",
+  "version": "0.1.0",
+  "description": "PKUSEG inference engine for modern JavaScript runtimes",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./browser": "./src/browser.js",
+    "./core": "./src/core.js"
+  },
+  "files": [
+    "src/",
+    "models/",
+    "tools/",
+    "example/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "benchmark": "node benchmark/benchmark.js",
+    "verify-models": "node tools/verify-models.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

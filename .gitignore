@@ -1,0 +1,8 @@
+node_modules/
+coverage/
+__pycache__/
+*.py[cod]
+*.tmp
+*.log
+# binary inference models (regenerable via tools/, files exceed GitHub 100MB limit)
+models/
