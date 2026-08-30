@@ -35,3 +35,58 @@ export function hashPair(text) {
 
   return [first >>> 0, second >>> 0];
 }
+
+/**
+ * Reusable incremental hasher. Feeding a sequence of strings yields exactly
+ * the same pair as hashPair() over their concatenation, without building the
+ * concatenated string. Not reentrant: call digest() before any nested use,
+ * then read hashFirst/hashSecond.
+ */
+export class PairHasher {
+  constructor() {
+    this.reset();
+    this.hashFirst = 0;
+    this.hashSecond = 0;
+  }
+
+  reset() {
+    this.first = 0x811c_9dc5;
+    this.second = 0x9747_b28c;
+    this.length = 0;
+    return this;
+  }
+
+  feed(text) {
+    let first = this.first;
+    let second = this.second;
+    let length = this.length;
+    for (const character of text) {
+      const codePoint = character.codePointAt(0);
+
+      first = Math.imul((first ^ codePoint) >>> 0, 0x0100_0193) >>> 0;
+
+      let mixed = Math.imul(codePoint, 0xcc9e_2d51) >>> 0;
+      mixed = rotateLeft32(mixed, 15);
+      mixed = Math.imul(mixed, 0x1b87_3593) >>> 0;
+      second = (second ^ mixed) >>> 0;
+      second = rotateLeft32(second, 13);
+      second = (Math.imul(second, 5) + 0xe654_6b64) >>> 0;
+      length += 1;
+    }
+    this.first = first;
+    this.second = second;
+    this.length = length;
+    return this;
+  }
+
+  digest() {
+    let second = (this.second ^ this.length) >>> 0;
+    second = (second ^ (second >>> 16)) >>> 0;
+    second = Math.imul(second, 0x85eb_ca6b) >>> 0;
+    second = (second ^ (second >>> 13)) >>> 0;
+    second = Math.imul(second, 0xc2b2_ae35) >>> 0;
+    second = (second ^ (second >>> 16)) >>> 0;
+    this.hashFirst = this.first >>> 0;
+    this.hashSecond = second >>> 0;
+  }
+}

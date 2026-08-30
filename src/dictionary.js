@@ -19,6 +19,7 @@ function normalizeEntry(entry) {
 export class UserDictionary {
   constructor(entries = []) {
     this.root = new TrieNode();
+    this.empty = true;
     for (const entry of entries) {
       const [word, tag] = normalizeEntry(entry);
       if (word.length > 0) {
@@ -39,9 +40,19 @@ export class UserDictionary {
     }
     node.isWord = true;
     node.userTag = tag;
+    this.empty = false;
   }
 
   split(text) {
+    // Empty trie can never match; walking it would still cost a full
+    // Array.from over the text. The result below is exactly what the loop
+    // produces for an empty trie.
+    if (this.empty) {
+      return text.length === 0
+        ? { parts: [], isWords: [], tags: [] }
+        : { parts: [text], isWords: [false], tags: [""] };
+    }
+
     const characters = Array.from(text);
     const parts = [];
     const isWords = [];

@@ -1,8 +1,8 @@
 import {
   normalizePostagToken,
-  postagFeaturesAt,
+  postagFeaturesInto,
 } from "./feature-extractor.js";
-import { decodeViterbi } from "./inference.js";
+import { createViterbiScratch, decodeViterbiFused } from "./inference.js";
 
 export class Postag {
   constructor(model) {
@@ -11,18 +11,42 @@ export class Postag {
     }
     this.model = model;
     this.tags = model.metadata.tags;
+    this._scratch = null;
+  }
+
+  // Per-tagger reusable buffers, same single-threaded rationale as Segmenter.
+  _tagScratch() {
+    if (this._scratch === null) {
+      const scratch = { nodes: [], viterbi: createViterbiScratch() };
+      scratch.fill = (node, out) =>
+        postagFeaturesInto(this.model, scratch.nodes, node, out);
+      this._scratch = scratch;
+    }
+    return this._scratch;
   }
 
   tag(words) {
     if (words.length === 0) {
       return [];
     }
-    const normalized = words.map(normalizePostagToken);
-    const featureLists = normalized.map((_, index) =>
-      postagFeaturesAt(this.model, normalized, index),
+    const scratch = this._tagScratch();
+    const nodes = scratch.nodes;
+    for (let index = 0; index < words.length; index += 1) {
+      nodes[index] = normalizePostagToken(words[index]);
+    }
+    // See Segmenter: keep nodes.length at the exact word count.
+    nodes.length = words.length;
+
+    const states = decodeViterbiFused(
+      this.model,
+      words.length,
+      scratch.fill,
+      scratch.viterbi,
     );
-    return decodeViterbi(featureLists, this.model).map(
-      (identifier) => this.tags[identifier],
-    );
+    const tags = new Array(words.length);
+    for (let index = 0; index < words.length; index += 1) {
+      tags[index] = this.tags[states[index]];
+    }
+    return tags;
   }
 }

@@ -18,6 +18,10 @@ class FeatureTable {
 
   lookup(text) {
     const [first, second] = hashPair(text);
+    return this.lookupHash(first, second);
+  }
+
+  lookupHash(first, second) {
     let slot = first & this.mask;
 
     for (let probes = 0; probes < this.identifiers.length; probes += 1) {
@@ -52,6 +56,14 @@ class MembershipTable {
     }
 
     const [first, second] = hashPair(text);
+    return this.hasHash(first, second);
+  }
+
+  hasHash(first, second) {
+    if (this.occupied.length === 0) {
+      return false;
+    }
+
     let slot = first & this.mask;
     for (let probes = 0; probes < this.occupied.length; probes += 1) {
       if (this.occupied[slot] === 0) {
@@ -208,14 +220,46 @@ export class Model {
     this.featureTable = featureTable;
     this.unigramTable = unigramTable;
     this.dictionaryTable = dictionaryTable;
+    // Per-model memoization for the hot feature-lookup path. All entries are
+    // pure cache: every miss falls back to the same table lookup the engine
+    // always used, so outputs stay byte-identical. Maps are size-capped by
+    // the feature extractor and degrade to direct lookups past the cap.
+    this.optCache = {
+      nodeIds: new Map(), // normalized segmentation char -> integer id
+      nodeStrs: [], // integer id -> normalized char
+      feat1: new Map(), // single-char context feature -> featureId | -1
+      feat2: new Map(), // two-char context feature -> featureId | -1
+      gramIds: new Map(), // window hash first -> Map(second -> gramId)
+      gramStrs: ["**noWord"], // gramId -> window string; id 0 means no hit
+      gramFeat: new Map(), // w-1./w1. feature by gramId -> featureId | -1
+      wwL: new Map(), // prefixGramId -> Map(suffixGramId -> featureId | -1)
+      wwR: new Map(),
+      wwEntries: 0,
+      normToken: new Map(), // raw postag token -> normalized token
+      wordIds: new Map(), // normalized postag word -> integer id
+      wordStrs: [],
+      wordIntrinsic: new Map(), // wordId -> known intrinsic featureIds
+      posFeat1: new Map(), // word-context feature -> featureId | -1
+      posFeat2: new Map(), // word-pair feature -> featureId | -1
+      posConst: null, // cached BOS/EOS feature ids
+      edgeScores: null, // transition matrix, built once per model
+    };
   }
 
   lookupFeature(text) {
     return this.featureTable.lookup(text);
   }
 
+  lookupFeatureHash(first, second) {
+    return this.featureTable.lookupHash(first, second);
+  }
+
   hasUnigram(text) {
     return this.unigramTable.has(text);
+  }
+
+  hasUnigramHash(first, second) {
+    return this.unigramTable.hasHash(first, second);
   }
 
   hasDictionaryWord(text) {

@@ -1,9 +1,9 @@
 import { UserDictionary, applyDefaultDictionary } from "./dictionary.js";
 import {
-  normalizeSegmentationText,
-  segmentationFeaturesAt,
+  normalizedSegmentationCharacter,
+  segmentationFeaturesInto,
 } from "./feature-extractor.js";
-import { decodeViterbi } from "./inference.js";
+import { createViterbiScratch, decodeViterbiFused } from "./inference.js";
 
 export class Segmenter {
   constructor(model, { userDictionary = [], useDefaultDictionary = true, tagger = null } = {}) {
@@ -17,30 +17,65 @@ export class Segmenter {
     this.userDictionary = new UserDictionary(userDictionary);
     this.useDefaultDictionary = useDefaultDictionary;
     this.tagger = tagger;
+    this._scratch = null;
+  }
+
+  // Per-segmenter reusable buffers. cut() is synchronous and single-threaded,
+  // so one scratch set per segmenter cannot be reentered.
+  _segScratch() {
+    if (this._scratch === null) {
+      const scratch = {
+        nodes: [],
+        offsets: new Int32Array(1024),
+        viterbi: createViterbiScratch(),
+      };
+      scratch.fill = (node, out) =>
+        segmentationFeaturesInto(this.model, scratch.nodes, node, out);
+      this._scratch = scratch;
+    }
+    return this._scratch;
   }
 
   _cutFragment(text) {
-    const originalCharacters = Array.from(text);
-    if (originalCharacters.length === 0) {
+    const scratch = this._segScratch();
+    const nodes = scratch.nodes;
+    let offsets = scratch.offsets;
+
+    // Normalize in a single code-point pass while recording the UTF-16
+    // offset of each character, so words can later be assembled by slicing
+    // the original text instead of concatenating per-character strings.
+    let count = 0;
+    let offset = 0;
+    for (const character of text) {
+      if (count >= offsets.length) {
+        const grown = new Int32Array(offsets.length * 2);
+        grown.set(offsets);
+        offsets = grown;
+        scratch.offsets = grown;
+      }
+      nodes[count] = normalizedSegmentationCharacter(character);
+      offsets[count] = offset;
+      offset += character.length;
+      count += 1;
+    }
+    if (count === 0) {
       return [];
     }
-    const normalized = normalizeSegmentationText(text);
-    const featureLists = normalized.map((_, index) =>
-      segmentationFeaturesAt(this.model, normalized, index),
-    );
-    const states = decodeViterbi(featureLists, this.model);
+    // Drop stale entries from previous longer calls; the feature extractor
+    // reads nodes.length for its context-window bounds.
+    nodes.length = count;
+
+    const states = decodeViterbiFused(this.model, count, scratch.fill, scratch.viterbi);
 
     const words = [];
-    let currentWord = originalCharacters[0];
-    for (let index = 1; index < originalCharacters.length; index += 1) {
+    let wordStart = 0;
+    for (let index = 1; index < count; index += 1) {
       if (this.tags[states[index]].includes("B")) {
-        words.push(currentWord);
-        currentWord = originalCharacters[index];
-      } else {
-        currentWord += originalCharacters[index];
+        words.push(text.slice(offsets[wordStart], offsets[index]));
+        wordStart = index;
       }
     }
-    words.push(currentWord);
+    words.push(text.slice(offsets[wordStart]));
     return words;
   }
 
@@ -72,8 +107,10 @@ export class Segmenter {
         const processed = this.useDefaultDictionary
           ? applyDefaultDictionary(cutWords, this.model)
           : cutWords;
-        output.push(...processed);
-        userTags.push(...processed.map(() => ""));
+        for (const word of processed) {
+          output.push(word);
+          userTags.push("");
+        }
       }
     }
     return { words: output, userTags };
